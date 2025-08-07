@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Asistencia con GPS</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 2em; max-width: 600px; margin: auto; }
+    #status { margin-top: 1em; font-weight: bold; }
+    button { margin-top: 1em; padding: 0.5em 1em; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h2>Registro de Asistencia</h2>
+  <p>Presiona el botón para registrar tu ubicación y continuar con la asistencia.</p>
+  <button onclick="getLocation()">Registrar Asistencia</button>
+  <p id="status"></p>
+
+  <script>
+    // Coordenadas aproximadas del aula (ejemplo)
+    const aulaLat = -34.6037;  // Buenos Aires
+    const aulaLng = -58.3816;
+    const radioPermitido = 0.0008; // ~80m
+
+    function getLocation() {
+      const status = document.getElementById("status");
+      status.textContent = "Obteniendo ubicación...";
+
+      if (!navigator.geolocation) {
+        status.textContent = "Geolocalización no soportada por tu navegador.";
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(success, error);
+
+      function success(position) {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        const distancia = Math.sqrt(Math.pow(lat - aulaLat, 2) + Math.pow(lng - aulaLng, 2));
+
+        if (distancia <= radioPermitido) {
+          status.textContent = "Ubicación verificada ✅ Redirigiendo al formulario...";
+          const formURL = "https://docs.google.com/forms/d/e/1FAIpQLSfP1aTuEjemploURL/viewform?usp=pp_url";
+          // Aquí puedes pasar lat/lng como parámetros si querés
+          setTimeout(() => {
+            window.location.href = formURL;
+          }, 2000);
+        } else {
+          status.textContent = "🚫 No estás en el aula. Ubicación detectada: (" + lat.toFixed(5) + ", " + lng.toFixed(5) + ")";
+        }
+      }
+
+      function error(err) {
+        status.textContent = "Error obteniendo ubicación: " + err.message;
+      }
+    }
+  </script>
+</body>
+</html>
