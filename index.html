@@ -1,210 +1,235 @@
 <!doctype html>
 <html lang="es">
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Registro de Asistencia</title>
-<!-- ===== Estilos (reemplaza tu <style> completo por este) ===== -->
-<!-- ===== Estilos mobile-first ===== -->
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    background: #f5f7fa;
-    margin: 0;
-    padding: 0;
-  }
-  .container {
-    max-width: 400px;
-    margin: 30px auto;
-    background: white;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  }
-  h2 {
-    margin-top: 0;
-    color: #333;
-    font-size: 22px;
-  }
-  input[type="text"] {
-    width: 100%;
-    padding: 10px;
-    margin: 8px 0;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    font-size: 16px;
-  }
-  button {
-    background: #007BFF;
-    color: white;
-    border: none;
-    padding: 10px;
-    border-radius: 6px;
-    font-size: 16px;
-    cursor: pointer;
-    width: 100%;
-  }
-  button:hover {
-    background: #0056b3;
-  }
-  #status {
-    margin-top: 10px;
-    font-size: 14px;
-    color: #555;
-  }
-</style>
-
-
-<!-- ===== Cuerpo (mantiene IDs y hooks JS) ===== -->
-<div class="card">
-  <h2>Registro de Asistencia</h2>
-  <p class="sub">Ingresá tu legajo. La ubicación se valida automáticamente.</p>
-
-  <!-- El JS ya lo muestra al registrar OK (display:inline-block). Dejamos mensaje fuerte. -->
-  <div id="okPill">
-    ✅ ¡Asistencia registrada correctamente!
-    <span class="small">Tu registro quedó guardado. Podés cerrar esta página.</span>
-  </div>
-
-  <div id="form" class="formbox">
-    <div class="row">
-      <input
-        id="legajo"
-        type="text"
-        inputmode="numeric"
-        pattern="[0-9]*"
-        autocomplete="one-time-code"
-        placeholder="Ej: 12345" />
-      <button id="btn" onclick="enviar()">Enviar</button>
-    </div>
-
-    <!-- aria-live para lectores y para que el mensaje “respire” en mobile -->
-    <div id="status" class="status" aria-live="polite">Preparando…</div>
-
-    <!-- Botón de reintento de GPS (tu JS ya lo usa si existe) -->
-    <div class="actions">
-      <button id="retry" class="secondary" type="button">Reintentar GPS</button>
-    </div>
-  </div>
-</div>
-
-
-<!-- ===== Marca tu <body> así (mantiene los mismos IDs y hooks JS) ===== -->
-<div class="card">
-  <h2>Registro de Asistencia</h2>
-  <p class="sub">Ingresá tu legajo. La ubicación se valida automáticamente.</p>
-
-  <div id="okPill" class="pill">✓ Enviado</div>
-
-  <div id="form" class="formbox">
-    <div class="row">
-      <input id="legajo" type="text" inputmode="numeric" autocomplete="one-time-code"
-             placeholder="Ej: 12345" />
-      <button id="btn" onclick="enviar()">Enviar</button>
-    </div>
-
-    <div id="status" class="status">Preparando…</div>
-
-    <!-- si usás reintento de GPS, este botón ya existe en tu JS -->
-    <div class="actions">
-      <button id="retry" class="secondary" type="button">Reintentar GPS</button>
-    </div>
-  </div>
-</div>
-
-<body>
-  <div class="card">
-    <h2>Registro</h2>
-    <p id="status" class="status">Preparando…</p>
-    <div class="row">
-      <input id="legajo" placeholder="Legajo" inputmode="numeric">
-      <button id="btn">Enviar</button>
-    </div>
-  </div>
-<script>
-const WEBAPP = 'https://script.google.com/macros/s/AKfycbwpT9s5Zewh1Me_IPU9AIfmHFy88GTJIG9LVeze-yl7-jUBsc4cqX2Z7NhJzow4mlg/exec'; // <-- tu /exec público
-const urlParams = new URLSearchParams(location.search);
-const TOKEN = urlParams.get('token') || ''; // el QR pone ?token=XXXX
-
-let geo = {lat:null, lon:null, accuracy:null}, challenge = null;
-
-function setStatus(t, cls){ const s=document.getElementById('status'); s.textContent=t; s.className='status '+(cls||''); }
-function getDeviceId(){
-  const k='asistencia.deviceId'; let v=localStorage.getItem(k);
-  if(!v){ v=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)); localStorage.setItem(k,v); }
-  return v;
-}
-
-// 1) Geolocalización
-function startGeo(){
-  if(!navigator.geolocation){ setStatus('Tu dispositivo no permite ubicación.','err'); return; }
-  navigator.geolocation.getCurrentPosition(
-    p=>{ geo={lat:p.coords.latitude, lon:p.coords.longitude, accuracy:p.coords.accuracy}; setStatus('Listo para enviar','ok'); },
-    _=>setStatus('No se pudo obtener ubicación aún. Permití acceso o activá GPS/Wi-Fi.','err'),
-    {enableHighAccuracy:true, timeout:15000, maximumAge:0}
-  );
-}
-
-// 2) Obtener nonce
-async function getChallenge(){
-  const deviceId = getDeviceId();
-  const r = await fetch(`${WEBAPP}?action=challenge&token=${encodeURIComponent(TOKEN)}&deviceId=${encodeURIComponent(deviceId)}`, {method:'GET'});
-  const j = await r.json();
-  if(!j.ok) throw new Error(j.error||'No se pudo preparar verificación');
-  challenge = j;
-}
-
-// 3) Enviar asistencia
-async function enviar(){
-  const legajo = document.getElementById('legajo').value.trim();
-  if(!legajo){ setStatus('Ingresá tu legajo.','err'); return; }
-  if(geo.lat==null){ setStatus('Aún sin ubicación.','err'); return; }
-
-  try{
-    setStatus('Enviando…');
-    if(!challenge) await getChallenge();
-
-    const deviceId = getDeviceId();
-    const form = new URLSearchParams({
-      legajo,
-      token: TOKEN,
-      lat: String(geo.lat),
-      lon: String(geo.lon),
-      deviceId,
-      nonce: challenge.nonce,
-      accuracy: String(geo.accuracy ?? '')
-    }).toString();
-    
-    const r = await fetch(WEBAPP, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: form
-    });
-    const j = await r.json();
-
-    if(j.ok && j.success){
-      setStatus(j.message || '¡Listo! Asistencia registrada.','ok');
-    } else {
-      throw new Error(j.error || j.message || 'Error desconocido');
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Registro de Asistencia</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; background: #f6f8fb; }
+    .card {
+      max-width: 520px; margin: 32px auto; background: #fff; padding: 20px 20px 16px;
+      border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,.08);
     }
-  }catch(e){
-    setStatus(String(e.message||e),'err');
-  }
-}
+    h2 { margin: 0 0 8px; font-weight: 700; }
+    p  { margin: 0 0 8px; color: #333; }
+    .muted { color: #6b7280; }
+    .err   { color: #b91c1c; }
+    .ok    { color: #065f46; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    input[type="text"] {
+      width: 100%; font-size: 16px; padding: 12px 12px;
+      border: 1px solid #e5e7eb; border-radius: 10px; outline: none;
+    }
+    input[type="text"].bad { border-color: #ef4444; background: #fff7f7; }
+    button {
+      padding: 12px 16px; border: 0; border-radius: 12px; font-weight: 700;
+      background: #111827; color: white; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,.12);
+    }
+    button[disabled] { opacity: .6; cursor: not-allowed; }
+    .pill {
+      display: none; font-size: 16px; padding: 12px; border-radius: 12px; font-weight: 800;
+      background: #d1fae5; color: #065f46; border: 1px solid #86efac; margin-bottom: 10px;
+    }
+    .status { min-height: 22px; }
+    .tips { font-size: 12px; color: #555; }
+    .actions { display:flex; gap:8px; margin-top:6px; }
+    .secondary { background:#374151; }
+  </style>
+</head>
+<body>
+  <noscript style="display:block;max-width:520px;margin:16px auto;color:#b91c1c">
+    Esta página requiere JavaScript para funcionar.
+  </noscript>
 
+  <div class="card">
+    <h2>Registro de Asistencia</h2>
+    <p class="muted">Preparando…</p>
 
-document.getElementById('btn').addEventListener('click', enviar);
-document.getElementById('legajo').addEventListener('keydown',(e)=>{ if(e.key==='Enter') enviar(); });
+    <!-- Panel de éxito grande -->
+    <div id="okPill" class="pill">✅ ¡Asistencia registrada correctamente! Tu registro quedó guardado.</div>
 
-setStatus('Buscando señal…'); startGeo(); getChallenge().catch(()=>{});
-</script>
+    <div id="form">
+      <p>Ingresá tu legajo para registrar asistencia.</p>
+      <div class="row" style="margin-top:8px">
+        <input id="legajo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Legajo" autocomplete="one-time-code" />
+        <button id="btn">Enviar</button>
+      </div>
+      <p id="status" class="status muted" style="margin-top:6px">Buscando señal…</p>
+      <div class="actions">
+        <button id="retry" class="secondary" type="button">Reintentar</button>
+      </div>
+      <div id="tips" class="tips" style="display:none; margin-top:6px">
+        • Activá Wi-Fi para mejorar la precisión.<br>
+        • Abrí la app “Mapas” y esperá unos segundos.<br>
+        • Quitá el ahorro de batería y permití “Ubicación precisa”.<br>
+        • Si denegaste el permiso, habilitalo en los ajustes del navegador.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== CONFIGURACIÓN =====
+    // URL del Web App de Apps Script (deployment público /exec)
+    const WEBAPP = 'https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec'; // <-- PONÉ TU /exec AQUÍ
+
+    // Token llega por ?token=XXXX (lo pone tu QR)
+    const TOKEN = new URLSearchParams(location.search).get('token') || '';
+
+    // ===== Estado global =====
+    let geo = { lat: null, lon: null, accuracy: null, ts: 0 };
+    let challenge = null;
+    let sending = false;
+    let watchId = null;
+
+    // Tiempos y umbrales
+    const MAX_WAIT_TOTAL_MS   = 30000;
+    const QUICK_TIMEOUT_MS    = 4000;
+    const WATCH_TIMEOUT_MS    = 25000;
+    const LASTKNOWN_MAX_AGEMS = 5*60*1000;
+    const ACCEPTABLE_ACC_M    = 300;
+    const HARD_MAX_ACC_M      = 1200;
+
+    // ===== Utilidades UI =====
+    function $(id){ return document.getElementById(id); }
+    function setStatus(t, cls) { const el = $('status'); el.className = 'status ' + (cls || ''); el.textContent = t || ''; }
+    function markInputError(){ const i=$('legajo'); i.classList.add('bad'); i.focus(); i.select(); }
+    function clearInputError(){ $('legajo').classList.remove('bad'); }
+    function readyToSend(){ return (!!geo.lat && !!geo.lon && !!challenge && !sending); }
+    function updateButtonState(){ $('btn').disabled = !readyToSend(); }
+    $('btn')?.addEventListener('click', enviar);
+    $('retry')?.addEventListener('click', retryGeo);
+    $('legajo')?.addEventListener('input', clearInputError);
+    $('legajo')?.addEventListener('keydown', (ev)=>{ if (ev.key === 'Enter') enviar(); });
+
+    function getDeviceId() {
+      const key = 'asistencia.deviceId';
+      let v = localStorage.getItem(key);
+      if (!v) { v = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2); localStorage.setItem(key, v); }
+      return v;
+    }
+
+    // ===== Geolocalización robusta =====
+    function applyPos(p){
+      const c = p.coords;
+      geo = { lat: c.latitude, lon: c.longitude, accuracy: c.accuracy, ts: Date.now() };
+      if (c.accuracy <= ACCEPTABLE_ACC_M) setStatus("Listo para enviar", "ok");
+      else if (c.accuracy <= HARD_MAX_ACC_M) setStatus("Ubicación obtenida (precisión ~" + Math.round(c.accuracy) + " m). Podés enviar.", "muted");
+      else setStatus("Se obtuvo ubicación pero con precisión baja (~" + Math.round(c.accuracy) + " m). Podés intentar igual o reintentar.", "muted");
+      updateButtonState();
+    }
+    function handleGeoError(err, phase){
+      if (err && err.code === 1) { setStatus("Permiso de ubicación denegado. Activá la ubicación para continuar.", "err"); showTips(); return; }
+      // otros errores: dejamos que los demás intentos sigan
+    }
+    function showTips(){ $('tips').style.display = 'block'; }
+
+    function startGeo(){
+      setStatus("Buscando señal…", "muted");
+      $('tips').style.display = 'none';
+      if (!('geolocation' in navigator)) { setStatus("Tu dispositivo no permite ubicación.", "err"); showTips(); return; }
+
+      navigator.geolocation.getCurrentPosition(
+        (p)=>{ applyPos(p); },
+        (e)=>handleGeoError(e,'quick'),
+        { enableHighAccuracy: false, timeout: QUICK_TIMEOUT_MS, maximumAge: LASTKNOWN_MAX_AGEMS }
+      );
+
+      try {
+        watchId = navigator.geolocation.watchPosition(
+          (p)=>{ applyPos(p); },
+          (e)=>handleGeoError(e,'watch'),
+          { enableHighAccuracy: true, timeout: WATCH_TIMEOUT_MS, maximumAge: 0 }
+        );
+      } catch(e) {}
+
+      setTimeout(() => {
+        if (!geo.lat || !geo.lon) {
+          navigator.geolocation.getCurrentPosition(
+            (p)=>{ applyPos(p); },
+            (e)=>{ setStatus("No pudimos obtener ubicación. Reintentá.", "err"); showTips(); },
+            { enableHighAccuracy: false, timeout: 4000, maximumAge: LASTKNOWN_MAX_AGEMS }
+          );
+        }
+      }, MAX_WAIT_TOTAL_MS);
+
+      updateButtonState();
+      // pedir challenge en paralelo
+      getChallenge().catch(()=>{});
+    }
+
+    function stopGeo(){ if (watchId != null) { try { navigator.geolocation.clearWatch(watchId); } catch(e){} watchId = null; } }
+    function retryGeo(){ stopGeo(); geo = { lat:null, lon:null, accuracy:null, ts:0 }; updateButtonState(); startGeo(); }
+
+    // ===== Backend: challenge & registrar =====
+    async function getChallenge(){
+      const deviceId = getDeviceId();
+      const url = `${WEBAPP}?action=challenge&token=${encodeURIComponent(TOKEN)}&deviceId=${encodeURIComponent(deviceId)}`;
+      const r = await fetch(url, { method:'GET' });
+      const j = await r.json(); // debe venir JSON
+      if(!j.ok) throw new Error(j.error || 'No se pudo preparar verificación');
+      challenge = j; updateButtonState();
+    }
+
+    async function enviar(){
+      const legajo = $('legajo').value.trim();
+      if(!legajo){ setStatus('Ingresá tu legajo.', 'err'); markInputError(); return; }
+      if(geo.lat==null || geo.lon==null){ setStatus('Aún sin ubicación. Esperá y reintentá.', 'err'); return; }
+
+      sending = true; updateButtonState();
+      setStatus('Enviando…', 'muted');
+
+      // challenge fresco si no está
+      if(!challenge){ try { await getChallenge(); } catch(e){ setStatus('No se pudo preparar verificación. Reintentá.', 'err'); sending=false; updateButtonState(); return; } }
+
+      try{
+        const deviceId = getDeviceId();
+        const body = new URLSearchParams({
+          legajo,
+          token: TOKEN,
+          lat: String(geo.lat),
+          lon: String(geo.lon),
+          deviceId,
+          nonce: challenge.nonce,
+          accuracy: String(geo.accuracy ?? '')
+        }).toString();
+
+        const r = await fetch(WEBAPP, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body
+        });
+
+        const text = await r.text();
+        let j; try { j = JSON.parse(text); } catch { throw new Error('Respuesta no-JSON del servidor: ' + text.slice(0,120)); }
+
+        if (j.ok && j.success) {
+          setStatus(j.message || '¡Listo! Asistencia registrada.', 'ok');
+          $('form').style.display = 'none';
+          $('okPill').style.display = 'block';
+          stopGeo();
+        } else {
+          throw new Error(j.error || j.message || 'Error desconocido');
+        }
+      } catch(e){
+        setStatus(String(e.message||e), 'err');
+      } finally {
+        sending = false; updateButtonState();
+      }
+    }
+
+    // init
+    window.addEventListener('DOMContentLoaded', () => {
+      $('btn').disabled = true;
+      startGeo();
+      // aviso si permisos denegados (cuando el browser lo soporta)
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({name:'geolocation'}).then(res=>{
+          if (res.state === 'denied') { setStatus("Permiso de ubicación denegado. Activalo para continuar.", "err"); showTips(); }
+        }).catch(()=>{});
+      }
+    });
+  </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
