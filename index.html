@@ -59,22 +59,40 @@ async function enviar(){
   const legajo = document.getElementById('legajo').value.trim();
   if(!legajo){ setStatus('Ingresá tu legajo.','err'); return; }
   if(geo.lat==null){ setStatus('Aún sin ubicación.','err'); return; }
+
   try{
     setStatus('Enviando…');
-    if(!challenge) await getChallenge(); // fresco
+    if(!challenge) await getChallenge();
+
     const deviceId = getDeviceId();
+    const form = new URLSearchParams({
+      legajo,
+      token: TOKEN,
+      lat: String(geo.lat),
+      lon: String(geo.lon),
+      deviceId,
+      nonce: challenge.nonce,
+      accuracy: String(geo.accuracy ?? '')
+    }).toString();
+
     const r = await fetch(WEBAPP, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ legajo, token:TOKEN, lat:geo.lat, lon:geo.lon, deviceId, nonce:challenge.nonce, accuracy:geo.accuracy })
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: form,           // 👈 evita el preflight
+      // credentials: 'omit' // asegúrate de que el WebApp esté en "Anyone"
     });
+
     const j = await r.json();
-    if(j.ok && j.success){ setStatus(j.message || '¡Listo! Asistencia registrada.','ok'); }
-    else { throw new Error(j.error || j.message || 'Error desconocido'); }
+    if(j.ok && j.success){
+      setStatus(j.message || '¡Listo! Asistencia registrada.','ok');
+    } else {
+      throw new Error(j.error || j.message || 'Error desconocido');
+    }
   }catch(e){
     setStatus(String(e.message||e),'err');
   }
 }
+
 
 document.getElementById('btn').addEventListener('click', enviar);
 document.getElementById('legajo').addEventListener('keydown',(e)=>{ if(e.key==='Enter') enviar(); });
@@ -83,6 +101,7 @@ setStatus('Buscando señal…'); startGeo(); getChallenge().catch(()=>{});
 </script>
 </body>
 </html>
+
 
 
 
