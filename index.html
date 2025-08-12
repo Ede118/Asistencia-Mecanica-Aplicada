@@ -39,15 +39,10 @@
   </style>
 </head>
 <body>
-  <noscript style="display:block;max-width:520px;margin:16px auto;color:#b91c1c">
-    Esta página requiere JavaScript para funcionar.
-  </noscript>
-
   <div class="card">
     <h2>Registro de Asistencia</h2>
     <p class="muted">Preparando…</p>
 
-    <!-- Panel de éxito grande -->
     <div id="okPill" class="pill">✅ ¡Asistencia registrada correctamente! Tu registro quedó guardado.</div>
 
     <div id="form">
@@ -70,20 +65,15 @@
   </div>
 
   <script>
-    // ===== CONFIGURACIÓN =====
-    // URL del Web App de Apps Script (deployment público /exec)
-    const WEBAPP = 'https://script.google.com/macros/s/AKfycbwpT9s5Zewh1Me_IPU9AIfmHFy88GTJIG9LVeze-yl7-jUBsc4cqX2Z7NhJzow4mlg/exec'; // <-- PONÉ TU /exec AQUÍ
-
-    // Token llega por ?token=XXXX (lo pone tu QR)
+    const WEBAPP = 'https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec'; // <-- PONÉ TU /exec AQUÍ
     const TOKEN = new URLSearchParams(location.search).get('token') || '';
 
-    // ===== Estado global =====
     let geo = { lat: null, lon: null, accuracy: null, ts: 0 };
     let challenge = null;
     let sending = false;
     let watchId = null;
+    let lockStatus = false; // evita que applyPos pise mensajes importantes
 
-    // Tiempos y umbrales
     const MAX_WAIT_TOTAL_MS   = 30000;
     const QUICK_TIMEOUT_MS    = 4000;
     const WATCH_TIMEOUT_MS    = 25000;
@@ -91,18 +81,19 @@
     const ACCEPTABLE_ACC_M    = 300;
     const HARD_MAX_ACC_M      = 1200;
 
-    // ===== Utilidades UI =====
     function $(id){ return document.getElementById(id); }
-    function setStatus(t, cls) { const el = $('status'); el.className = 'status ' + (cls || ''); el.textContent = t || ''; }
+
+    function setStatus(t, cls, lock = false) {
+      const el = $('status');
+      el.className = 'status ' + (cls || '');
+      el.textContent = t || '';
+      lockStatus = lock;
+    }
+
     function markInputError(){ const i=$('legajo'); i.classList.add('bad'); i.focus(); i.select(); }
     function clearInputError(){ $('legajo').classList.remove('bad'); }
     function readyToSend(){ return (!!geo.lat && !!geo.lon && !!challenge && !sending); }
     function updateButtonState(){ $('btn').disabled = !readyToSend(); }
-    $('btn')?.addEventListener('click', enviar);
-    $('retry')?.addEventListener('click', retryGeo);
-    $('legajo')?.addEventListener('input', clearInputError);
-    $('legajo')?.addEventListener('keydown', (ev)=>{ if (ev.key === 'Enter') enviar(); });
-
     function getDeviceId() {
       const key = 'asistencia.deviceId';
       let v = localStorage.getItem(key);
@@ -110,36 +101,44 @@
       return v;
     }
 
-    // ===== Geolocalización robusta =====
-    function applyPos(p){
+    function applyPos(p) {
+      if (lockStatus) return; // no pisar mensaje si está bloqueado
       const c = p.coords;
       geo = { lat: c.latitude, lon: c.longitude, accuracy: c.accuracy, ts: Date.now() };
-      if (c.accuracy <= ACCEPTABLE_ACC_M) setStatus("Listo para enviar", "ok");
-      else if (c.accuracy <= HARD_MAX_ACC_M) setStatus("Ubicación obtenida (precisión ~" + Math.round(c.accuracy) + " m). Podés enviar.", "muted");
-      else setStatus("Se obtuvo ubicación pero con precisión baja (~" + Math.round(c.accuracy) + " m). Podés intentar igual o reintentar.", "muted");
+      if (c.accuracy <= ACCEPTABLE_ACC_M) {
+        setStatus("Listo para enviar", "ok");
+      } else if (c.accuracy <= HARD_MAX_ACC_M) {
+        setStatus("Ubicación obtenida (precisión ~" + Math.round(c.accuracy) + " m). Podés enviar.", "muted");
+      } else {
+        setStatus("Se obtuvo ubicación pero con precisión baja (~" + Math.round(c.accuracy) + " m). Podés intentar igual o reintentar.", "muted");
+      }
       updateButtonState();
     }
-    function handleGeoError(err, phase){
-      if (err && err.code === 1) { setStatus("Permiso de ubicación denegado. Activá la ubicación para continuar.", "err"); showTips(); return; }
-      // otros errores: dejamos que los demás intentos sigan
+
+    function handleGeoError(err){
+      if (err && err.code === 1) {
+        setStatus("Permiso de ubicación denegado. Activá la ubicación para continuar.", "err", true);
+        showTips();
+      }
     }
+
     function showTips(){ $('tips').style.display = 'block'; }
 
     function startGeo(){
       setStatus("Buscando señal…", "muted");
       $('tips').style.display = 'none';
-      if (!('geolocation' in navigator)) { setStatus("Tu dispositivo no permite ubicación.", "err"); showTips(); return; }
+      if (!('geolocation' in navigator)) { setStatus("Tu dispositivo no permite ubicación.", "err", true); showTips(); return; }
 
       navigator.geolocation.getCurrentPosition(
         (p)=>{ applyPos(p); },
-        (e)=>handleGeoError(e,'quick'),
+        (e)=>handleGeoError(e),
         { enableHighAccuracy: false, timeout: QUICK_TIMEOUT_MS, maximumAge: LASTKNOWN_MAX_AGEMS }
       );
 
       try {
         watchId = navigator.geolocation.watchPosition(
           (p)=>{ applyPos(p); },
-          (e)=>handleGeoError(e,'watch'),
+          (e)=>handleGeoError(e),
           { enableHighAccuracy: true, timeout: WATCH_TIMEOUT_MS, maximumAge: 0 }
         );
       } catch(e) {}
@@ -148,40 +147,46 @@
         if (!geo.lat || !geo.lon) {
           navigator.geolocation.getCurrentPosition(
             (p)=>{ applyPos(p); },
-            (e)=>{ setStatus("No pudimos obtener ubicación. Reintentá.", "err"); showTips(); },
+            (e)=>{ setStatus("No pudimos obtener ubicación. Reintentá.", "err", true); showTips(); },
             { enableHighAccuracy: false, timeout: 4000, maximumAge: LASTKNOWN_MAX_AGEMS }
           );
         }
       }, MAX_WAIT_TOTAL_MS);
 
       updateButtonState();
-      // pedir challenge en paralelo
-      getChallenge().catch(()=>{});
+      getChallenge().catch(e => setStatus(e.message, "err", true));
     }
 
     function stopGeo(){ if (watchId != null) { try { navigator.geolocation.clearWatch(watchId); } catch(e){} watchId = null; } }
-    function retryGeo(){ stopGeo(); geo = { lat:null, lon:null, accuracy:null, ts:0 }; updateButtonState(); startGeo(); }
+    function retryGeo(){
+      lockStatus = false; // desbloquear mensajes automáticos
+      stopGeo();
+      geo = { lat:null, lon:null, accuracy:null, ts:0 };
+      updateButtonState();
+      startGeo();
+    }
 
-    // ===== Backend: challenge & registrar =====
     async function getChallenge(){
       const deviceId = getDeviceId();
       const url = `${WEBAPP}?action=challenge&token=${encodeURIComponent(TOKEN)}&deviceId=${encodeURIComponent(deviceId)}`;
-      const r = await fetch(url, { method:'GET' });
-      const j = await r.json(); // debe venir JSON
-      if(!j.ok) throw new Error(j.error || 'No se pudo preparar verificación');
+      const r = await fetch(url);
+      const j = await r.json();
+      if(!j.ok) { setStatus(j.error || 'No se pudo preparar verificación', 'err', true); throw new Error(j.error || 'No se pudo preparar verificación'); }
       challenge = j; updateButtonState();
     }
 
     async function enviar(){
       const legajo = $('legajo').value.trim();
-      if(!legajo){ setStatus('Ingresá tu legajo.', 'err'); markInputError(); return; }
-      if(geo.lat==null || geo.lon==null){ setStatus('Aún sin ubicación. Esperá y reintentá.', 'err'); return; }
+      if(!legajo){ setStatus('Ingresá tu legajo.', 'err', true); markInputError(); return; }
+      if(geo.lat==null || geo.lon==null){ setStatus('Aún sin ubicación. Esperá y reintentá.', 'err', true); return; }
 
       sending = true; updateButtonState();
       setStatus('Enviando…', 'muted');
 
-      // challenge fresco si no está
-      if(!challenge){ try { await getChallenge(); } catch(e){ setStatus('No se pudo preparar verificación. Reintentá.', 'err'); sending=false; updateButtonState(); return; } }
+      if(!challenge){
+        try { await getChallenge(); }
+        catch(e){ setStatus(e.message, 'err', true); sending=false; updateButtonState(); return; }
+      }
 
       try{
         const deviceId = getDeviceId();
@@ -205,32 +210,33 @@
         let j; try { j = JSON.parse(text); } catch { throw new Error('Respuesta no-JSON del servidor: ' + text.slice(0,120)); }
 
         if (j.ok && j.success) {
-          setStatus(j.message || '¡Listo! Asistencia registrada.', 'ok');
+          setStatus(j.message || '¡Listo! Asistencia registrada.', 'ok', true);
           $('form').style.display = 'none';
           $('okPill').style.display = 'block';
           stopGeo();
         } else {
-          throw new Error(j.error || j.message || 'Error desconocido');
+          setStatus(j.error || j.message || 'Error desconocido', 'err', true);
         }
       } catch(e){
-        setStatus(String(e.message||e), 'err');
+        setStatus(String(e.message||e), 'err', true);
       } finally {
         sending = false; updateButtonState();
       }
     }
 
-    // init
     window.addEventListener('DOMContentLoaded', () => {
       $('btn').disabled = true;
       startGeo();
-      // aviso si permisos denegados (cuando el browser lo soporta)
+      $('btn').addEventListener('click', enviar);
+      $('retry').addEventListener('click', retryGeo);
+      $('legajo').addEventListener('input', clearInputError);
+      $('legajo').addEventListener('keydown', (ev)=>{ if (ev.key === 'Enter') enviar(); });
       if (navigator.permissions && navigator.permissions.query) {
         navigator.permissions.query({name:'geolocation'}).then(res=>{
-          if (res.state === 'denied') { setStatus("Permiso de ubicación denegado. Activalo para continuar.", "err"); showTips(); }
+          if (res.state === 'denied') { setStatus("Permiso de ubicación denegado. Activalo para continuar.", "err", true); showTips(); }
         }).catch(()=>{});
       }
     });
   </script>
 </body>
 </html>
-
