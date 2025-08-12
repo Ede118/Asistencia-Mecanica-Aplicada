@@ -219,11 +219,14 @@
         if (j.ok && j.success) {
           setStatus(j.message || '¡Listo! Asistencia registrada.', 'ok', true);
           $('form').style.display = 'none';
+          // 👇 NUEVO: mostrar el texto devuelto por backend
+          $('okPill').textContent = j.message || '¡Asistencia registrada correctamente! Tu registro quedó guardado.';
           $('okPill').style.display = 'block';
           stopGeo();
         } else {
           setStatus(j.error || j.message || 'Error desconocido', 'err', true);
         }
+
       } catch(e){
         setStatus(String(e.message||e), 'err', true);
       } finally {
@@ -244,5 +247,6 @@
   </script>
 </body>
 </html>
+
 
 
