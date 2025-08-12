@@ -27,7 +27,7 @@
       background: #111827; color: white; cursor: pointer;
       box-shadow: 0 4px 14px rgba(0,0,0,.12);
     }
-    button[disabled] { opacity: .25; cursor: not-allowed; }
+    button[disabled] { opacity: .2; cursor: not-allowed; }
     .pill {
       display: none; font-size: 16px; padding: 12px; border-radius: 12px; font-weight: 800;
       background: #d1fae5; color: #065f46; border: 1px solid #86efac; margin-bottom: 10px;
@@ -41,7 +41,7 @@
 <body>
   <div class="card">
     <h2>Registro de Asistencia</h2>
-    <!-- <p class="muted">Preparando…</p> -->
+    <p class="muted">Preparando…</p>
 
     <div id="okPill" class="pill">✅ ¡Asistencia registrada correctamente! Tu registro quedó guardado.</div>
 
@@ -51,7 +51,7 @@
         <input id="legajo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Legajo" autocomplete="one-time-code" />
         <button id="btn">Enviar</button>
       </div>
-      <p id="status" class="status muted" style="margin-top:6px">Buscando señal…</p>
+      <p id="status" class="status muted" style="margin-top:6px" aria-live="polite">Buscando señal…</p>
       <div class="actions">
         <button id="retry" class="secondary" type="button">Reintentar</button>
       </div>
@@ -65,15 +65,18 @@
   </div>
 
   <script>
-    const WEBAPP = 'https://script.google.com/macros/s/AKfycbwpT9s5Zewh1Me_IPU9AIfmHFy88GTJIG9LVeze-yl7-jUBsc4cqX2Z7NhJzow4mlg/exec'; // <-- PONÉ TU /exec AQUÍ
+    // ===== CONFIG =====
+    const WEBAPP = 'https://script.google.com/macros/s/AKfycbwpT9s5Zewh1Me_IPU9AIfmHFy88GTJIG9LVeze-yl7-jUBsc4cqX2Z7NhJzow4mlg/exec'; // <-- tu /exec
     const TOKEN = new URLSearchParams(location.search).get('token') || '';
 
+    // ===== Estado =====
     let geo = { lat: null, lon: null, accuracy: null, ts: 0 };
     let challenge = null;
     let sending = false;
     let watchId = null;
-    let lockStatus = false; // evita que applyPos pise mensajes importantes
+    let lockStatus = false; // evita que el GPS pise mensajes importantes
 
+    // Umbrales
     const MAX_WAIT_TOTAL_MS   = 30000;
     const QUICK_TIMEOUT_MS    = 4000;
     const WATCH_TIMEOUT_MS    = 25000;
@@ -81,28 +84,27 @@
     const ACCEPTABLE_ACC_M    = 300;
     const HARD_MAX_ACC_M      = 1200;
 
-    function $(id){ return document.getElementById(id); }
-
+    // ===== Util =====
+    const $ = (id)=>document.getElementById(id);
     function setStatus(t, cls, lock = false) {
       const el = $('status');
       el.className = 'status ' + (cls || '');
       el.textContent = t || '';
       lockStatus = lock;
     }
-
     function markInputError(){ const i=$('legajo'); i.classList.add('bad'); i.focus(); i.select(); }
     function clearInputError(){ $('legajo').classList.remove('bad'); }
     function readyToSend(){ return (!!geo.lat && !!geo.lon && !!challenge && !sending); }
     function updateButtonState(){ $('btn').disabled = !readyToSend(); }
-    function getDeviceId() {
-      const key = 'asistencia.deviceId';
-      let v = localStorage.getItem(key);
-      if (!v) { v = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2); localStorage.setItem(key, v); }
+    function getDeviceId(){
+      const k='asistencia.deviceId'; let v=localStorage.getItem(k);
+      if(!v){ v=(crypto && crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)); localStorage.setItem(k,v); }
       return v;
     }
 
+    // ===== GEO =====
     function applyPos(p) {
-      if (lockStatus) return; // no pisar mensaje si está bloqueado
+      if (sending || lockStatus) return; // no pisar durante envío o cuando hay error/éxito bloqueado
       const c = p.coords;
       geo = { lat: c.latitude, lon: c.longitude, accuracy: c.accuracy, ts: Date.now() };
       if (c.accuracy <= ACCEPTABLE_ACC_M) {
@@ -114,15 +116,21 @@
       }
       updateButtonState();
     }
-
     function handleGeoError(err){
       if (err && err.code === 1) {
         setStatus("Permiso de ubicación denegado. Activá la ubicación para continuar.", "err", true);
         showTips();
       }
     }
-
     function showTips(){ $('tips').style.display = 'block'; }
+    function stopGeo(){ if (watchId != null) { try { navigator.geolocation.clearWatch(watchId); } catch(e){} watchId = null; } }
+    function retryGeo(){
+      lockStatus = false; // desbloquear mensajes auto
+      stopGeo();
+      geo = { lat:null, lon:null, accuracy:null, ts:0 };
+      updateButtonState();
+      startGeo();
+    }
 
     function startGeo(){
       setStatus("Buscando señal…", "muted");
@@ -155,17 +163,15 @@
 
       updateButtonState();
       getChallenge().catch(e => setStatus(e.message, "err", true));
+
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({name:'geolocation'}).then(res=>{
+          if (res.state === 'denied') { setStatus("Permiso de ubicación denegado. Activalo para continuar.", "err", true); showTips(); }
+        }).catch(()=>{});
+      }
     }
 
-    function stopGeo(){ if (watchId != null) { try { navigator.geolocation.clearWatch(watchId); } catch(e){} watchId = null; } }
-    function retryGeo(){
-      lockStatus = false; // desbloquear mensajes automáticos
-      stopGeo();
-      geo = { lat:null, lon:null, accuracy:null, ts:0 };
-      updateButtonState();
-      startGeo();
-    }
-
+    // ===== Backend =====
     async function getChallenge(){
       const deviceId = getDeviceId();
       const url = `${WEBAPP}?action=challenge&token=${encodeURIComponent(TOKEN)}&deviceId=${encodeURIComponent(deviceId)}`;
@@ -180,8 +186,9 @@
       if(!legajo){ setStatus('Ingresá tu legajo.', 'err', true); markInputError(); return; }
       if(geo.lat==null || geo.lon==null){ setStatus('Aún sin ubicación. Esperá y reintentá.', 'err', true); return; }
 
-      sending = true; updateButtonState();
-      setStatus('Enviando…', 'muted');
+      sending = true;                    // bloquear actualizaciones
+      updateButtonState();
+      setStatus('Enviando…', 'muted', true); // mantener visible “Enviando…”
 
       if(!challenge){
         try { await getChallenge(); }
@@ -220,25 +227,20 @@
       } catch(e){
         setStatus(String(e.message||e), 'err', true);
       } finally {
-        sending = false; updateButtonState();
+        sending = false; // ya no se está enviando, pero mantenemos lock hasta que toquen Reintentar
+        updateButtonState();
       }
     }
 
+    // ===== Init =====
     window.addEventListener('DOMContentLoaded', () => {
       $('btn').disabled = true;
-      startGeo();
       $('btn').addEventListener('click', enviar);
       $('retry').addEventListener('click', retryGeo);
       $('legajo').addEventListener('input', clearInputError);
       $('legajo').addEventListener('keydown', (ev)=>{ if (ev.key === 'Enter') enviar(); });
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({name:'geolocation'}).then(res=>{
-          if (res.state === 'denied') { setStatus("Permiso de ubicación denegado. Activalo para continuar.", "err", true); showTips(); }
-        }).catch(()=>{});
-      }
+      startGeo();
     });
   </script>
 </body>
 </html>
-
-
