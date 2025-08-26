@@ -81,8 +81,8 @@
     const QUICK_TIMEOUT_MS    = 4000;
     const WATCH_TIMEOUT_MS    = 25000;
     const LASTKNOWN_MAX_AGEMS = 5*60*1000;
-    const ACCEPTABLE_ACC_M    = 300;
-    const HARD_MAX_ACC_M      = 1200;
+    const ACCEPTABLE_ACC_M    = 800;
+    const HARD_MAX_ACC_M      = 2000;
 
     // ===== Util =====
     const $ = (id)=>document.getElementById(id);
@@ -140,7 +140,7 @@
       navigator.geolocation.getCurrentPosition(
         (p)=>{ applyPos(p); },
         (e)=>handleGeoError(e),
-        { enableHighAccuracy: false, timeout: QUICK_TIMEOUT_MS, maximumAge: LASTKNOWN_MAX_AGEMS }
+        { enableHighAccuracy: true, timeout: QUICK_TIMEOUT_MS, maximumAge: LASTKNOWN_MAX_AGEMS }
       );
 
       try {
@@ -156,7 +156,7 @@
           navigator.geolocation.getCurrentPosition(
             (p)=>{ applyPos(p); },
             (e)=>{ setStatus("No pudimos obtener ubicación. Reintentá.", "err", true); showTips(); },
-            { enableHighAccuracy: false, timeout: 4000, maximumAge: LASTKNOWN_MAX_AGEMS }
+            { enableHighAccuracy: true, timeout: 4000, maximumAge: LASTKNOWN_MAX_AGEMS }
           );
         }
       }, MAX_WAIT_TOTAL_MS);
