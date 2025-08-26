@@ -219,13 +219,40 @@
         if (j.ok && j.success) {
           setStatus(j.message || '¡Listo! Asistencia registrada.', 'ok', true);
           $('form').style.display = 'none';
-          // 👇 NUEVO: mostrar el texto devuelto por backend
           $('okPill').textContent = j.message || '¡Asistencia registrada correctamente! Tu registro quedó guardado.';
           $('okPill').style.display = 'block';
           stopGeo();
         } else {
-          setStatus(j.error || j.message || 'Error desconocido', 'err', true);
+          const msg = (j.error || j.message || 'Error desconocido');
+          // Si falló la verificación (nonce/challenge), renová y reintentá UNA sola vez
+          if (/verificación/i.test(msg)) {
+            try {
+              await getChallenge(); // refresca nonce
+              const r2 = await fetch(WEBAPP, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                body
+              });
+              const text2 = await r2.text();
+              let j2; try { j2 = JSON.parse(text2); } catch { throw new Error('Respuesta no-JSON del servidor: ' + text2.slice(0,120)); }
+
+              if (j2.ok && j2.success) {
+                setStatus(j2.message || '¡Listo! Asistencia registrada.', 'ok', true);
+                $('form').style.display = 'none';
+                $('okPill').textContent = j2.message || '¡Asistencia registrada correctamente! Tu registro quedó guardado.';
+                $('okPill').style.display = 'block';
+                stopGeo();
+                return;
+              }
+              setStatus(j2.error || j2.message || msg, 'err', true);
+            } catch (_) {
+              setStatus(msg, 'err', true);
+            }
+          } else {
+            setStatus(msg, 'err', true);
+          }
         }
+
 
       } catch(e){
         setStatus(String(e.message||e), 'err', true);
